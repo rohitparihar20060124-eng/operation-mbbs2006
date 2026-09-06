@@ -1,41 +1,51 @@
-/* ------------------------------------------------------------------
-   Persistence layer.
+const EMAIL_KEY = "apx2_notify_email";
+const NOTIFIED_KEY = "apx2_notified_chapters";
 
-   The original Claude Artifact build used `window.storage`, an API
-   that only exists inside Claude's Artifacts panel. A real deployed
-   app has no such global, so this module provides a drop-in
-   replacement backed by the browser's localStorage. It keeps the
-   same { get(key), set(key, value) } shape (wrapped in a resolved
-   value, not a Promise, but `await` works fine on non-Promises) so
-   the rest of the app didn't need to change.
-   ------------------------------------------------------------------ */
-
-const PREFIX = "opmbbs_";
-
-export const storage = {
-  get(key) {
-    try {
-      const raw = window.localStorage.getItem(PREFIX + key);
-      if (raw === null) return null;
-      return { key, value: raw };
-    } catch (_) {
-      return null;
-    }
-  },
-  set(key, value) {
-    try {
-      window.localStorage.setItem(PREFIX + key, value);
-      return { key, value };
-    } catch (_) {
-      return null;
-    }
-  },
-  remove(key) {
-    try {
-      window.localStorage.removeItem(PREFIX + key);
-      return { key };
-    } catch (_) {
-      return null;
-    }
+export function getNotifyEmail() {
+  try {
+    return window.localStorage.getItem(EMAIL_KEY) || "";
+  } catch (_) {
+    return "";
   }
-};
+}
+
+export function setNotifyEmail(email) {
+  try {
+    window.localStorage.setItem(EMAIL_KEY, email);
+  } catch (_) {}
+}
+
+export function getNotifiedChapters() {
+  try {
+    const raw = window.localStorage.getItem(NOTIFIED_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+export function markChapterNotified(chapterId) {
+  try {
+    const list = getNotifiedChapters();
+    if (!list.includes(chapterId)) {
+      list.push(chapterId);
+      window.localStorage.setItem(NOTIFIED_KEY, JSON.stringify(list));
+    }
+  } catch (_) {}
+}
+
+export async function sendChapterCompleteEmail({ email, subject, chapterId, chapterName }) {
+  const res = await fetch("/api/send-chapter-complete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, subject, chapterId, chapterName })
+  });
+  if (!res.ok) {
+    let details = "";
+    try {
+      details = JSON.stringify(await res.json());
+    } catch (_) {}
+    throw new Error("Email request failed (" + res.status + "): " + details);
+  }
+  return res.json();
+}
