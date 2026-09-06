@@ -1,6 +1,10 @@
-import { useState, useEffect, useMemo } from "react";
-import { CARD, SECT_TITLE, PB } from "./styles.js";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { CARD, SECT_TITLE, PB, INP } from "./styles.js";
 import { ProgBar, Ring } from "./components/Primitives.jsx";
+import {
+  getNotifyEmail, setNotifyEmail, getNotifiedChapters,
+  markChapterNotified, sendChapterCompleteEmail
+} from "./lib/notify.js";
 import { MockModal } from "./components/MockModal.jsx";
 import { ErrModal } from "./components/ErrModal.jsx";
 import { Pomodoro } from "./components/Pomodoro.jsx";
@@ -33,6 +37,9 @@ export default function App() {
   const [lectSubject, setLectSubject] = useState("Physics");
   const [expandedChapter, setExpandedChapter] = useState(null);
 
+  const [emailInput, setEmailInput] = useState("");
+  const [emailStatus, setEmailStatus] = useState("");
+
   const motive = useMemo(() => MOTIVES[Math.floor(Math.random() * MOTIVES.length)], []);
 
   /* ---- Load from storage (localStorage, wrapped so it can be awaited) ---- */
@@ -50,7 +57,50 @@ export default function App() {
       }
       setLoaded(true);
     })();
+    setEmailInput(getNotifyEmail());
   }, []);
+
+  /* ---- Check every chapter's lecture progress; email a congrats +
+     practice PDF for any chapter that has reached 100% and hasn't
+     been notified yet. Callable from the auto-effect below, from the
+     Save button (in case a chapter was already complete before the
+     email was set), and from a manual "Check now" button. ---- */
+  const [emailCheckStatus, setEmailCheckStatus] = useState("");
+
+  const checkCompletionsAndNotify = useCallback((showStatus) => {
+    const email = getNotifyEmail();
+    if (!email) {
+      if (showStatus) setEmailCheckStatus("Save an email address first.");
+      return;
+    }
+    const notified = getNotifiedChapters();
+    let sentCount = 0;
+    Object.entries(LDATA).forEach(([subj, d]) => {
+      d.chapters.forEach(ch => {
+        const done = LS[ch.id] || 0;
+        if (ch.t > 0 && done >= ch.t && !notified.includes(ch.id)) {
+          markChapterNotified(ch.id);
+          sentCount++;
+          sendChapterCompleteEmail({ email, subject: subj, chapterId: ch.id, chapterName: ch.n })
+            .catch(err => console.error("Chapter-complete email failed:", err));
+        }
+      });
+    });
+    if (showStatus) {
+      setEmailCheckStatus(
+        sentCount > 0
+          ? `Sent ${sentCount} email${sentCount > 1 ? "s" : ""} for completed chapter${sentCount > 1 ? "s" : ""}!`
+          : "No new completed chapters to notify — all caught up."
+      );
+      setTimeout(() => setEmailCheckStatus(""), 4000);
+    }
+  }, [LS]);
+
+  /* ---- Auto-run whenever lecture progress changes ---- */
+  useEffect(() => {
+    if (!loaded) return;
+    checkCompletionsAndNotify(false);
+  }, [LS, loaded, checkCompletionsAndNotify]);
 
   /* ---- Save to storage ---- */
   useEffect(() => { if (loaded) storage.set("apx2ts", JSON.stringify(TS)); }, [TS, loaded]);
@@ -208,6 +258,53 @@ export default function App() {
                   <div style={{ fontSize: "1.05rem", fontWeight: 800, fontFamily: "monospace" }}>{k.val}</div>
                 </div>
               ))}
+            </div>
+
+            <div style={CARD}>
+              <div style={SECT_TITLE}>Email Notifications</div>
+              <div style={{ fontSize: ".72rem", color: "#64748b", marginBottom: ".6rem" }}>
+                Get a congratulations email with a chapter practice-test PDF every time you finish all lectures in a chapter.
+              </div>
+              <div style={{ display: "flex", gap: ".5rem" }}>
+                <input
+                  style={INP} type="email" placeholder="you@example.com"
+                  value={emailInput}
+                  onChange={e => setEmailInput(e.target.value)}
+                />
+                <button
+                  style={PB}
+                  onClick={() => {
+                    setNotifyEmail(emailInput.trim());
+                    setEmailStatus("Saved!");
+                    setTimeout(() => setEmailStatus(""), 2000);
+                    // In case a chapter was already 100% before the email was set,
+                    // check right away instead of waiting for lecture progress to change.
+                    checkCompletionsAndNotify(true);
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+              {emailStatus && (
+                <div style={{ fontSize: ".68rem", color: "#10b981", marginTop: ".5rem", fontWeight: 700 }}>
+                  {emailStatus}
+                </div>
+              )}
+              <button
+                onClick={() => checkCompletionsAndNotify(true)}
+                style={{
+                  marginTop: ".7rem", background: "#f1f5f9", color: "#475569", border: "none",
+                  borderRadius: 8, padding: ".5rem .9rem", fontSize: ".72rem", fontWeight: 700,
+                  cursor: "pointer", fontFamily: "inherit"
+                }}
+              >
+                Check now for completed chapters
+              </button>
+              {emailCheckStatus && (
+                <div style={{ fontSize: ".68rem", color: "#3b82f6", marginTop: ".5rem", fontWeight: 700 }}>
+                  {emailCheckStatus}
+                </div>
+              )}
             </div>
 
             <div style={CARD}>
